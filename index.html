@@ -72,13 +72,14 @@ p{margin:0}
 .msg{font-size:13px;color:var(--bad);font-weight:600}
 .field.err select,.field.err input[type=text],.field.err input[type=date],.field.err textarea{border-color:var(--bad)}
 .field.err .chip span{border-color:var(--bad)}
-input[type=text],input[type=date],textarea,select{
+input[type=text],input[type=search],input[type=date],textarea,select{
   width:100%;min-height:44px;padding:9px 12px;border:1.5px solid var(--line);border-radius:6px;
   background:var(--surface);color:var(--ink);font:inherit;font-size:16px;
 }
 textarea{resize:vertical;min-height:84px}
 input[readonly]{background:var(--soft);color:var(--muted)}
 select{appearance:auto}
+.bsearch{margin-bottom:8px}
 input.mono{font-family:var(--f-mono);letter-spacing:.02em}
 .idrow{display:flex;gap:8px}
 .idrow input{flex:1;min-width:0}
@@ -554,6 +555,7 @@ function fieldHtml(f){
     if(f.k==='photo') ctl+='<div class="photobox"><div class="photobtns"><button class="btn small" type="button" id="photoCam">Take photo</button><button class="btn small ghost" type="button" id="photoGal">Choose from gallery</button></div><input type="file" id="photoCamIn" accept="image/*" capture="environment" class="sr" tabindex="-1" aria-label="Take a photograph"><input type="file" id="photoGalIn" accept="image/*" multiple class="sr" tabindex="-1" aria-label="Choose photographs from the gallery"><div class="thumbs" id="thumbs"></div><div class="hint" id="photoMsg" role="status"></div></div>';
   } else if(f.cascade){
     ctl='<select id="'+id+'"></select>';
+    if(f.k==='b_name') ctl='<input type="search" id="bq" class="bsearch" placeholder="Search beneficiary name" aria-label="Search beneficiary name" autocomplete="off" enterkeyhint="search">'+ctl;
   } else if(f.list==='pvtg'){
     ctl='<select id="'+id+'"><option value="">Choose PVTG community</option>'+PVTG_HINTS.slice().sort((a,b)=>a.localeCompare(b)).map(o=>'<option value="'+esc(o)+'">'+esc(o)+'</option>').join('')+'</select>';
   } else if(f.type==='textarea'){
@@ -619,9 +621,19 @@ function cascade(){
   const seen=new Set(), left=[]; let total=0;
   B.forEach(x=>{ const k=lc(x[1]); if(seen.has(k)) return; seen.add(k); total++; if(!used.has(k)) left.push(x); });
   const done=total-left.length;
-  setOpts('b_name',left.map(x=>({v:x[1],t:x[1]})),vl?(left.length?'Choose beneficiary ('+left.length+' left'+(done?', '+done+' already surveyed':'')+')':'All '+total+' beneficiaries in this village are surveyed'):'Choose village first');
+  // Names are shown A to Z. The search box keeps only names containing every word typed.
+  left.sort((a,b)=>String(a[1]).localeCompare(String(b[1]),'en',{sensitivity:'base'}));
+  const qEl=$('bq'), words=qEl?lc(qEl.value).split(/\s+/).filter(Boolean):[];
+  const shown=words.length?left.filter(x=>{const n=lc(x[1]); return words.every(w=>n.includes(w));}):left;
+  let ph;
+  if(!vl) ph='Choose village first';
+  else if(!left.length) ph='All '+total+' beneficiaries in this village are surveyed';
+  else if(words.length) ph=shown.length?'Choose from '+shown.length+' matching name'+(shown.length===1?'':'s'):'No name matches "'+qEl.value.trim()+'"';
+  else ph='Choose beneficiary ('+left.length+' left'+(done?', '+done+' already surveyed':'')+')';
+  setOpts('b_name',shown.map(x=>({v:x[1],t:x[1]})),ph);
 }
 function syncReg(){}
+function clearBq(){ const q=$('bq'); if(q) q.value=''; }
 function pickBeneficiary(name,reg){
   const el=$('f_b_name'); if(!name) return;
   const o=Array.from(el.options).find(x=>x.value===name&&(!reg||x.getAttribute('data-reg')===reg))||Array.from(el.options).find(x=>x.value===name);
@@ -658,7 +670,7 @@ function resetForm(keepDraft){
   });
   gpsStop(); touched.b_pvtg=false; touched.b_village=false; setEditing(null); clearPhotos(); const gm=$('gpsMsg'); if(gm) gm.textContent=''; const ga=$('gpsMap'); if(ga) ga.hidden=true;
   setVal('survey_id',newSurveyId()); setVal('survey_date',localDay(new Date()));
-  applyDefaults(); setVal('institution',FIXED_UNI); cascade(); syncReg(); clearErrors(); updateProgress(applyGating());
+  clearBq(); applyDefaults(); setVal('institution',FIXED_UNI); cascade(); syncReg(); clearErrors(); updateProgress(applyGating());
 }
 function fillForm(rec){
   F.forEach(f=>{
@@ -667,14 +679,16 @@ function fillForm(rec){
     else setVal(f.k,v==='N/A'?'':v);
   });
   touched.b_pvtg=true; touched.b_village=true;
-  cascade(); pickBeneficiary(rec.b_name); syncReg(); gpsLink();
+  clearBq(); cascade(); pickBeneficiary(rec.b_name); syncReg(); gpsLink();
   clearPhotos(); phGet(rec.rid).then(bl=>{ bl.forEach(b=>curPhotos.push({blob:b,url:URL.createObjectURL(b)})); renderThumbs(); }).catch(()=>{});
   clearErrors(); updateProgress(applyGating());
 }
 function onFormInput(e){
   const t=e.target; if(!t||(!t.id&&!t.name)) return;
+  if(t.id==='bq'){ if(e.type==='input') cascade(); return; }
   const w=t.closest('.field[data-k]');
   if(w){ w.classList.remove('err'); const m=w.querySelector('.msg'); if(m) m.hidden=true; }
+  if(t.id==='f_district'||t.id==='f_taluka'||t.id==='f_village') clearBq();
   if(t.id==='f_district'){ setVal('taluka',''); setVal('village',''); setVal('b_name',''); cascade(); syncReg(); }
   else if(t.id==='f_taluka'){ setVal('village',''); setVal('b_name',''); cascade(); syncReg(); }
   else if(t.id==='f_village'){ setVal('b_name',''); cascade(); syncReg(); }
